@@ -13,10 +13,15 @@
     <FileAlignment>512</FileAlignment>
     <PackageId>TCore.CmdLine</PackageId>
     <Authors>Robert Little</Authors>
-    <Company>Robert LittleRobert Little</Company>
+    <Company>Robert Little</Company>
     <Product>TCore.CmdLine</Product>
     <Description>Command line parsing support</Description>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageProjectUrl></PackageProjectUrl>
+    <PackageLicenseUrl>https://github.com/rlittletht/TCore.CmdLine/blob/master/LICENSE</PackageLicenseUrl>
+    <RepositoryUrl>https://github.com/rlittletht/TCore.CmdLine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>Initial nuget package</PackageReleaseNotes>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
