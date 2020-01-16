@@ -8,7 +8,72 @@ namespace TCore.CmdLine
 {
 	public partial class CmdLine
 	{
-		static void UnitTestNoDispatch()
+        static void UnitTestPositionalRequired()
+        {
+            CmdLineConfig cfg = new CmdLineConfig(new CmdLineSwitch[]
+            {
+                new CmdLineSwitch(null, false, true, "required positional switch 0", null, null),
+            });
+
+            CmdLine cl = new CmdLine(cfg);
+            string sError;
+
+            Debug.Assert(cl.FParse(new[] {"my-first-arg"}, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+
+            cl = new CmdLine(cfg);
+
+            Debug.Assert(!cl.FParse(new string[] { }, null, null, out sError));
+        }
+
+        static void UnitTestPositionalRequired_WithOtherOptionalArgs()
+        {
+            CmdLineConfig cfg = new CmdLineConfig(new CmdLineSwitch[]
+            {
+                new CmdLineSwitch("t", true, false, "optional toggle arg", null, null), 
+                new CmdLineSwitch(null, false, true, "required positional switch 0", null, null),
+                new CmdLineSwitch("v", false, false, "optional value arg", null, null), 
+            });
+
+            CmdLine cl = new CmdLine(cfg);
+            string sError;
+
+            Debug.Assert(cl.FParse(new[] { "my-first-arg" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+
+            cl = new CmdLine(cfg);
+            Debug.Assert(cl.FParse(new[] { "\"my quoted arg\"" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "\"my quoted arg\"");
+
+            cl = new CmdLine(cfg);
+            Debug.Assert(cl.FParse(new[] { "-t", "my-first-arg" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+            Debug.Assert(cl.FIsSwitchSet("t"));
+
+            cl = new CmdLine(cfg);
+            Debug.Assert(cl.FParse(new[] { "my-first-arg", "-t" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+            Debug.Assert(cl.FIsSwitchSet("t"));
+
+            cl = new CmdLine(cfg);
+            Debug.Assert(cl.FParse(new[] { "my-first-arg", "-v", "my-value" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+            Debug.Assert(cl.ParamFromSwitch("v") == "my-value");
+
+            cl = new CmdLine(cfg);
+            Debug.Assert(cl.FParse(new[] { "-v", "my-value", "my-first-arg" }, null, null, out sError));
+
+            Debug.Assert(cl.GetPositionalArg(0) == "my-first-arg");
+            Debug.Assert(cl.ParamFromSwitch("v") == "my-value");
+        }
+
+        static void UnitTestNoDispatch()
 		{
 			CmdLineConfig cfg = new CmdLineConfig(new CmdLineSwitch[] 
 				{
@@ -21,7 +86,7 @@ namespace TCore.CmdLine
 			CmdLine cl = new CmdLine(cfg);
 			string sError;
 
-			Debug.Assert(cl.FParse(new string[] { "-t" }, null, null, out sError));
+            Debug.Assert(cl.FParse(new string[] { "-t" }, null, null, out sError));
 			cl = new CmdLine(cfg);
 
 			Debug.Assert(cl.FParse(new string[] { "-t", "-a" }, null, null, out sError));
@@ -168,7 +233,9 @@ namespace TCore.CmdLine
 		{
 			UnitTestNoDispatch();
 			UnitTestDispatch();
-		}
+            UnitTestPositionalRequired();
+            UnitTestPositionalRequired_WithOtherOptionalArgs();
+        }
 
 	}
 }
