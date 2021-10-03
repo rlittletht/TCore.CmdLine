@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.Odbc;
-using System.Linq;
-using System.Text;
+using System.ComponentModel.Design;
 
 // USAGE:
 //
@@ -58,12 +56,15 @@ namespace TCore.CmdLine
 		string m_sArgDescription;
 		bool m_fRequired;
 		object m_oClient;
+        private bool m_fPositional;
 
 		string m_sParamValue;
 		bool m_fParsed;
 
+        public int PositionIndex { get; set; } // this is set when we know what position this arg is actually at
 		public string Switch { get { return m_sSwitch; } }
 		public bool Toggle { get { return m_fToggle; } }
+        public bool Positional {  get {  return m_fPositional; } }
 		public string Description { get { return m_sDescription; } }
 		public string ArgDescription { get { return m_sArgDescription; } }
 		public bool Required { get { return m_fRequired; } }
@@ -92,9 +93,15 @@ namespace TCore.CmdLine
 
 		----------------------------------------------------------------------------*/
 		public CmdLineSwitch(string sSwitch, bool fToggle, bool fRequired, string sDescription, string sArgDescription, object oClient)
-		{
+        {
+            if (string.IsNullOrEmpty(sSwitch))
+                m_fPositional = true;
+
 			m_sSwitch = sSwitch;
 			m_fToggle = fToggle;
+            if (m_fToggle && m_fPositional)
+                throw new Exception("cannot have a positional argument that is also a toggle argument");
+
 			m_sDescription = sDescription;
 			m_sArgDescription = sArgDescription;
 			m_fRequired = fRequired;
@@ -133,6 +140,8 @@ namespace TCore.CmdLine
 		Dictionary<char, CmdLineSwitch> m_mpchSwitch;
 		Dictionary<string, CmdLineSwitch> m_mpsSwitch;
 
+        private List<CmdLineSwitch> m_plPositionalArgs;
+
 		/* C M D  L I N E */
 		/*----------------------------------------------------------------------------
 			%%Function: CmdLine
@@ -143,50 +152,100 @@ namespace TCore.CmdLine
 		{
 			m_cfg = cfg;
 
-			foreach (CmdLineSwitch cls in cfg.Switches)
-				{
-				if (cls.Switch.Length == 1)
-					{
-					if (m_mpchSwitch == null)
-						m_mpchSwitch = new Dictionary<char, CmdLineSwitch>();
+            foreach (CmdLineSwitch cls in cfg.Switches)
+            {
+                if (string.IsNullOrEmpty(cls.Switch))
+                {
+                    if (m_plPositionalArgs == null)
+                        m_plPositionalArgs = new List<CmdLineSwitch>();
 
-					m_mpchSwitch.Add(cls.Switch[0], cls);
-					}
-				else
-					{
-					if (m_mpsSwitch == null)
-						m_mpsSwitch = new Dictionary<string, CmdLineSwitch>();
+                    m_plPositionalArgs.Add(cls);
+                }
+                else if (cls.Switch.Length == 1)
+                {
+                    if (m_mpchSwitch == null)
+                        m_mpchSwitch = new Dictionary<char, CmdLineSwitch>();
 
-					m_mpsSwitch.Add(cls.Switch, cls);
-					}
-       			cls.Reset();
-				}
-		}
+                    m_mpchSwitch.Add(cls.Switch[0], cls);
+                }
+                else if (cls.Switch.Length > 1)
+                {
+                    if (m_mpsSwitch == null)
+                        m_mpsSwitch = new Dictionary<string, CmdLineSwitch>();
 
-		/* C L S  F R O M  S W I T C H */
-		/*----------------------------------------------------------------------------
+                    m_mpsSwitch.Add(cls.Switch, cls);
+                }
+
+                cls.Reset();
+            }
+            
+            // verify positional args make sense
+            if (m_plPositionalArgs != null)
+            {
+                bool fMustBeNotRequired = false;
+
+                foreach (CmdLineSwitch cls in m_plPositionalArgs)
+                {
+                    if (cls.Toggle)
+                        throw new Exception("positional args cannot be toggle args");
+
+                    if (!cls.Positional)
+                        throw new Exception("cannot have a non-positional argument without a switch");
+
+                    if (fMustBeNotRequired && cls.Required)
+                        throw new Exception("cannot have required positional argument following an optional positional argument");
+
+                    if (!cls.Required)
+                        fMustBeNotRequired = true;
+                }
+            }
+        }
+
+        CmdLineSwitch ClsFromArg(string sArg, ref int iPositional)
+        {
+            if (sArg[0] != '-')
+            {
+                if (m_plPositionalArgs == null)
+                    return null;
+
+                if (iPositional >= m_plPositionalArgs.Count)
+                    return null;
+
+                CmdLineSwitch cls = m_plPositionalArgs[iPositional];
+                // can only bind to one positional index. set that here.
+                cls.PositionIndex = iPositional++;
+
+                return cls;
+            }
+
+            return ClsFromSwitch(sArg.Substring(1));
+        }
+
+
+        /* C L S  F R O M  S W I T C H */
+        /*----------------------------------------------------------------------------
 			%%Function: ClsFromSwitch
 			%%Qualified: CmdLineSupport.CmdLine.ClsFromSwitch
 			%%Contact: rlittle
 
 		----------------------------------------------------------------------------*/
-		CmdLineSwitch ClsFromSwitch(string sSwitch)
-		{
-			CmdLineSwitch cls = null;
+        CmdLineSwitch ClsFromSwitch(string sSwitch)
+        {
+            CmdLineSwitch cls = null;
 
-			if (sSwitch.Length == 1)
-				{
-				if (m_mpchSwitch.ContainsKey(sSwitch[0]))
-					cls = m_mpchSwitch[sSwitch[0]];
-				}
-			else
-				{
-				if (m_mpsSwitch.ContainsKey(sSwitch))
-					cls = m_mpsSwitch[sSwitch];
-				}
+            if (sSwitch.Length == 1)
+            {
+                if (m_mpchSwitch.ContainsKey(sSwitch[0]))
+                    cls = m_mpchSwitch[sSwitch[0]];
+            }
+            else
+            {
+                if (m_mpsSwitch.ContainsKey(sSwitch))
+                    cls = m_mpsSwitch[sSwitch];
+            }
 
-			return cls;
-		}
+            return cls;
+        }
 
         public delegate void CmdLineOutput(string s);
 
@@ -195,122 +254,152 @@ namespace TCore.CmdLine
             clo(String.Format("Usage..."));
 
             if (m_mpchSwitch != null)
-                {
+            {
                 foreach (char ch in m_mpchSwitch.Keys)
-                    {
+                {
                     CmdLineSwitch cls = m_mpchSwitch[ch];
 
                     if (cls.Toggle)
                         clo(String.Format("-{0}\t\t{1}", cls.Switch, cls.Description));
                     else
-                        {
+                    {
                         clo(String.Format("-{0} <{1}>\t\t{2}", cls.Switch, cls.ArgDescription, cls.Description));
-                        }
                     }
                 }
+            }
 
             if (m_mpsSwitch != null)
-                {
+            {
                 foreach (string s in m_mpsSwitch.Keys)
-                    {
+                {
                     CmdLineSwitch cls = m_mpsSwitch[s];
 
                     if (cls.Toggle)
                         clo(String.Format("-{0}\t\t{1}", cls.Switch, cls.Description));
                     else
-                        {
+                    {
                         clo(String.Format("-{0} <{1}>\t\t{2}", cls.Switch, cls.ArgDescription, cls.Description));
-                        }
                     }
                 }
+            }
+
+            if (m_plPositionalArgs != null)
+            {
+                foreach (CmdLineSwitch cls in m_plPositionalArgs)
+                {
+                    if (cls.Required)
+                        clo(String.Format("<{0}>\t\t{1}", cls.ArgDescription, cls.Description));
+                    else
+                    {
+                        clo(String.Format("[{0}] <{1}>\t\t{2}", cls.ArgDescription, cls.Description));
+                    }
+                }
+            }
+
         }
 
-		/* P A R S E */
-		/*----------------------------------------------------------------------------
+        /* P A R S E */
+        /*----------------------------------------------------------------------------
 			%%Function: Parse
 			%%Contact: rlittle
 
 		----------------------------------------------------------------------------*/
-		public bool FParse(string []rgsArgs, ICmdLineDispatch icld, object oClient, out string sError)
-		{
-			string sSwitch;
-			int i;
+        public bool FParse(string[] rgsArgs, ICmdLineDispatch icld, object oClient, out string sError)
+        {
+            string sArg;
+            int i;
+            int iPositionalNext = 0; // what is the next position dependent arg we will have (if we get one)
 
             sError = null;
 
-		    if (rgsArgs == null)
-		        return true;
+            if (rgsArgs == null)
+                return true;
 
-			for (i = 0; i < rgsArgs.Length; i++)
-				{
-				CmdLineSwitch cls = null;
-				string sParam = null;
+            for (i = 0; i < rgsArgs.Length; i++)
+            {
+                CmdLineSwitch cls = null;
+                string sParam = null;
 
-				if (rgsArgs[i][0] != '-')
-					{
-					sError = String.Format("argument '{0}' missing switch delimeter '-'", rgsArgs[i]);
-					return false;
-					}
-				
-				sSwitch = rgsArgs[i].Substring(1);
-				cls = ClsFromSwitch(sSwitch);
+                if (rgsArgs[i][0] != '-' && (m_plPositionalArgs == null || m_plPositionalArgs.Count <= iPositionalNext))
+                {
+                    sError = String.Format("argument '{0}' missing switch delimeter '-'", rgsArgs[i]);
+                    return false;
+                }
 
-				if (cls == null)
-					{
-					sError = String.Format("argument '{0}' illegal", rgsArgs[i]);
-					return false;
-					}
+                sArg = rgsArgs[i];
+                cls = ClsFromArg(sArg, ref iPositionalNext);
 
-				if (!cls.Toggle)
-					{
-					if (++i >= rgsArgs.Length)
-						{
-						sError = String.Format("expected argument to option '{0}' not found", rgsArgs[i - 1]);
-						return false;
-						}
+                if (cls == null)
+                {
+                    sError = String.Format("argument '{0}' illegal", rgsArgs[i]);
+                    return false;
+                }
 
-					sParam = rgsArgs[i];
-					}
+                if (cls.Positional)
+                {
+                    sParam = rgsArgs[i]; // don't pre-increment i here, there is no switch to skip
+                }
+                else if (!cls.Toggle)
+                {
+                    if (++i >= rgsArgs.Length)
+                    {
+                        sError = String.Format("expected argument to option '{0}' not found", rgsArgs[i - 1]);
+                        return false;
+                    }
 
-				if (icld != null)
-					{
-					if (!icld.FDispatchCmdLineSwitch(cls, sParam, oClient, out sError))
-						return false;
-					}
+                    sParam = rgsArgs[i];
+                }
 
-				cls.ParamValue = sParam;
-				cls.Parsed = true;
-				}
+                if (icld != null)
+                {
+                    if (!icld.FDispatchCmdLineSwitch(cls, sParam, oClient, out sError))
+                        return false;
+                }
 
-			// lastly, walk through all the params and make sure we have found all the required ones
-			if (m_mpchSwitch != null)
-				{
-				foreach (CmdLineSwitch cls in m_mpchSwitch.Values)
-					{
-					if (cls.Required && !cls.Parsed)
-						{
-						sError = String.Format("required parameter '{0}' not found", cls.Switch);
-						return false;
-						}
-					}
-				}
+                cls.ParamValue = sParam;
+                cls.Parsed = true;
+            }
 
-			if (m_mpsSwitch != null)
-				{
-				foreach (CmdLineSwitch cls in m_mpsSwitch.Values)
-					{
-					if (cls.Required && !cls.Parsed)
-						{
-						sError = String.Format("required parameter '{0}' not found", cls.Switch);
-						return false;
-						}
-					}
-				}
+            // lastly, walk through all the params and make sure we have found all the required ones
+            if (m_mpchSwitch != null)
+            {
+                foreach (CmdLineSwitch cls in m_mpchSwitch.Values)
+                {
+                    if (cls.Required && !cls.Parsed)
+                    {
+                        sError = String.Format("required parameter '{0}' not found", cls.Switch);
+                        return false;
+                    }
+                }
+            }
 
-			return true;
-		}
+            if (m_mpsSwitch != null)
+            {
+                foreach (CmdLineSwitch cls in m_mpsSwitch.Values)
+                {
+                    if (cls.Required && !cls.Parsed)
+                    {
+                        sError = String.Format("required parameter '{0}' not found", cls.Switch);
+                        return false;
+                    }
+                }
+            }
 
-		/* F  I S  S W I T C H  S E T */
+            if (m_plPositionalArgs != null)
+            {
+                foreach (CmdLineSwitch cls in m_plPositionalArgs)
+                {
+                    if (cls.Required && !cls.Parsed)
+                    {
+                        sError = String.Format("required positional parameter not found");
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        /* F  I S  S W I T C H  S E T */
 		/*----------------------------------------------------------------------------
 			%%Function: FIsSwitchSet
 			%%Qualified: CmdLineSupport.CmdLine.FIsSwitchSet
@@ -318,8 +407,8 @@ namespace TCore.CmdLine
 
 		----------------------------------------------------------------------------*/
 		public bool FIsSwitchSet(string sSwitch)
-		{
-			CmdLineSwitch cls = ClsFromSwitch(sSwitch);
+        {
+            CmdLineSwitch cls = ClsFromSwitch(sSwitch);
 
 			if (cls == null)
 				return false;
@@ -335,7 +424,7 @@ namespace TCore.CmdLine
 
 		----------------------------------------------------------------------------*/
 		public string ParamFromSwitch(string sSwitch)
-		{
+        {
 			CmdLineSwitch cls = ClsFromSwitch(sSwitch);
 
 			if (cls == null)
@@ -344,5 +433,12 @@ namespace TCore.CmdLine
 			return cls.ParamValue;
 		}
 
+        public string GetPositionalArg(int iPositional)
+        {
+            if (m_plPositionalArgs == null || iPositional >= m_plPositionalArgs.Count)
+                return null;
+
+            return m_plPositionalArgs[iPositional].ParamValue;
+        }
     }
 }
